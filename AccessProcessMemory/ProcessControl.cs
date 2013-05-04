@@ -6,8 +6,6 @@ using System.Runtime.InteropServices;
 
 namespace AccessProcessMemory
 {
-    internal delegate bool CallBackPtr(IntPtr hwnd, ref IntPtr lParam);
-
     internal enum GetWindowCommands : uint
     {
         HWNDFIRST = 0,
@@ -64,10 +62,13 @@ namespace AccessProcessMemory
         internal string szExeFile;
     }
 
-    public class Class1 : IDisposable
+    internal delegate bool CallBackPtr(IntPtr hwnd, ref IntPtr lParam);
+
+    public class ProcessControl : IDisposable
     {
         internal readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
 
+        #region DllImports
         [DllImport("kernel32.dll", SetLastError = true)]
         internal static extern IntPtr CreateToolhelp32Snapshot(
             SnapshotFlags dwFlags,
@@ -161,6 +162,7 @@ namespace AccessProcessMemory
             StringBuilder lpString,     // テキストバッファ
             int nMaxCount               // コピーする最大文字数
         );
+        #endregion
 
         public uint processId { get; private set; }
         private IntPtr processHandle { get; set; }
@@ -170,10 +172,11 @@ namespace AccessProcessMemory
         public string windowText { get; private set; }
         public IntPtr windowHandle { get; private set; }
 
+        public bool isOpened { get { return this.processHandle != default(IntPtr) && this.processHandle != INVALID_HANDLE_VALUE; } }
 
         private bool _disposed;
 
-        public Class1(string exeFile, string windowText)
+        public ProcessControl(string exeFile, string windowText)
         {
             this.exeFile = exeFile;
             this.windowText = windowText;
@@ -181,8 +184,10 @@ namespace AccessProcessMemory
             this.processHandle = default(IntPtr);
             this.windowHandle = default(IntPtr);
 
+            Open();
         }
-        
+
+        #region DisposePattern
         protected virtual void Dispose(bool disposing)
         {
             if (!this._disposed)
@@ -201,10 +206,11 @@ namespace AccessProcessMemory
             GC.SuppressFinalize(this);
         }
 
-        ~Class1()
+        ~ProcessControl()
         {
             Dispose(false);
         }
+        #endregion
 
         private uint SearchProcesses(string exeFile)
         {
@@ -233,7 +239,7 @@ namespace AccessProcessMemory
             return processId;
         }
 
-        public bool Open()
+        private bool Open()
         {
             this.processId = SearchProcesses(this.exeFile);
             var p = OpenProcess(ProcessAccessFlags.All, true, this.processId);
@@ -245,11 +251,12 @@ namespace AccessProcessMemory
             return false;
         }
 
-        public void Close()
+        private void Close()
         {
-            if (this.processHandle != default(IntPtr) || this.processHandle != INVALID_HANDLE_VALUE)
+            if (this.isOpened)
             {
                 CloseHandle(this.processHandle);
+                this.processHandle = default(IntPtr);
             }
         }
 
@@ -257,7 +264,7 @@ namespace AccessProcessMemory
         {
             var buffer = new byte[size];
             uint numberOfBytesRead;
-            if (this.processHandle != default(IntPtr) || this.processHandle != INVALID_HANDLE_VALUE)
+            if (this.isOpened)
             {
                 ReadProcessMemory(this.processHandle, baseAddress, buffer, size, out numberOfBytesRead);
             }
@@ -267,7 +274,7 @@ namespace AccessProcessMemory
         public bool write(IntPtr baseAddress, byte[] buffer, uint size)
         {
             uint numberOfBytesWritten;
-            if (this.processHandle != default(IntPtr) || this.processHandle != INVALID_HANDLE_VALUE)
+            if (this.isOpened)
             {
                 return WriteProcessMemory(this.processHandle, baseAddress, buffer, (uint)Marshal.SizeOf(buffer), out numberOfBytesWritten);
             }
@@ -303,10 +310,10 @@ namespace AccessProcessMemory
             }
         }
 
-        public void Active()
+        public void Activate()
         {
             SearchWindow();
-            if (this.windowHandle != IntPtr.Zero || this.windowHandle != INVALID_HANDLE_VALUE)
+            if (this.windowHandle != default(IntPtr) && this.windowHandle != INVALID_HANDLE_VALUE)
             {
                 SetForegroundWindow(this.windowHandle);
             }
