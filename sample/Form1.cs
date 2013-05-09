@@ -47,6 +47,11 @@ namespace sample
                             return;
                         }
                         c.Activate();
+                        var rect = c.GetRectangle();
+                        this.Invoke(new FormDelegate(() =>
+                        {
+                            this.label6.Text = "X : " + rect.X + ", Y : " + rect.Y + ", W : " + rect.Width + ", H : " + rect.Height;
+                        }));
                         uint data = 0;
                         uint data_old = 0;
                         while (this.isStarted)

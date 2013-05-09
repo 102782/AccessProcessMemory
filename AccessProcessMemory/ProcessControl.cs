@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Text;
 using System.Runtime.InteropServices;
+using System.Drawing;
 
 namespace AccessProcessMemory
 {
@@ -60,6 +61,15 @@ namespace AccessProcessMemory
         internal string szExeFile;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
     internal delegate bool CallBackPtr(IntPtr hwnd, ref IntPtr lParam);
 
     public class ProcessControl : IDisposable
@@ -100,7 +110,7 @@ namespace AccessProcessMemory
 
         [DllImport("psapi.dll", CallingConvention=CallingConvention.StdCall, SetLastError = true)]
         internal static extern int EnumProcessModules(
-            IntPtr hProcess,        // プロセスのハンドル
+            HandleRef hProcess,        // プロセスのハンドル
             [Out] IntPtr lphModule, // モジュールハンドルを受け取る配列
             uint cb,                // 配列のサイズ
             out uint lpcbNeeded     // 必要なバイト数
@@ -108,15 +118,15 @@ namespace AccessProcessMemory
 
         [DllImport("psapi.dll")]
         private extern static uint GetModuleBaseName(
-            IntPtr hProcess,            // プロセスのハンドル
-            IntPtr hModule,             // モジュールのハンドル
+            HandleRef hProcess,            // プロセスのハンドル
+            HandleRef hModule,             // モジュールのハンドル
             StringBuilder lpBaseName,   // ベース名を受け取るバッファ
             uint nSize                  // 取得したい文字の最大の長さ
         );
 
         [DllImport("kernel32.dll", SetLastError=true)]
         internal static extern bool ReadProcessMemory(
-            IntPtr hProcess,                // プロセスのハンドル
+            HandleRef hProcess,                // プロセスのハンドル
             IntPtr lpBaseAddress,           // 読み取り開始アドレス
             [Out] byte[] buffer,            // データを格納するバッファ
             UInt32 size,                    // 読み取りたいバイト数
@@ -125,7 +135,7 @@ namespace AccessProcessMemory
 
         [DllImport("kernel32.dll",SetLastError = true)]
         internal static extern bool WriteProcessMemory(
-            IntPtr hProcess,                // プロセスのハンドル
+            HandleRef hProcess,                // プロセスのハンドル
             IntPtr lpBaseAddress,           // 書き込み開始アドレス
             byte[] lpBuffer,                // データバッファ
             uint nSize,                     // 書き込みたいバイト数
@@ -140,25 +150,32 @@ namespace AccessProcessMemory
 
         [DllImport("User32.dll")]
         internal extern static IntPtr GetWindow(
-            IntPtr hWnd,            // 元ウィンドウのハンドル
+            HandleRef hWnd,            // 元ウィンドウのハンドル
             GetWindowCommands uCmd  // 関係
         );
 
         [DllImport("User32.dll")]
         internal extern static bool IsWindowVisible(
-            IntPtr hWnd   // ウィンドウのハンドル
+            HandleRef hWnd   // ウィンドウのハンドル
         );
 
         [DllImport("User32.dll")]
         internal extern static bool SetForegroundWindow(
-            IntPtr hWnd   // ウィンドウのハンドル
+            HandleRef hWnd   // ウィンドウのハンドル
         );
 
         [DllImport("User32.dll")]
         internal extern static int GetWindowText(
-            IntPtr hWnd,                // ウィンドウまたはコントロールのハンドル
+            HandleRef hWnd,                // ウィンドウまたはコントロールのハンドル
             StringBuilder lpString,     // テキストバッファ
             int nMaxCount               // コピーする最大文字数
+        );
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal extern static bool GetWindowRect(
+            HandleRef hWnd, // ウィンドウのハンドル
+            out RECT lpRect // ウィンドウの座標値
         );
         #endregion
 
@@ -264,7 +281,7 @@ namespace AccessProcessMemory
             uint numberOfBytesRead;
             if (this.isOpened)
             {
-                ReadProcessMemory(this.processHandle, baseAddress, buffer, size, out numberOfBytesRead);
+                ReadProcessMemory(new HandleRef(this, this.processHandle), baseAddress, buffer, size, out numberOfBytesRead);
             }
             return buffer;
         }
@@ -274,7 +291,7 @@ namespace AccessProcessMemory
             uint numberOfBytesWritten;
             if (this.isOpened)
             {
-                return WriteProcessMemory(this.processHandle, baseAddress, buffer, (uint)Marshal.SizeOf(buffer), out numberOfBytesWritten);
+                return WriteProcessMemory(new HandleRef(this, this.processHandle), baseAddress, buffer, (uint)Marshal.SizeOf(buffer), out numberOfBytesWritten);
             }
             return false;
         }
@@ -282,9 +299,9 @@ namespace AccessProcessMemory
         private bool EnumWindowsProcess(IntPtr hwnd, ref IntPtr lp)
         {
             StringBuilder strWindowText = new StringBuilder("", 1024);
-            GetWindowText(hwnd, strWindowText, 1024);
+            GetWindowText(new HandleRef(this, hwnd), strWindowText, 1024);
             if (strWindowText.ToString() == "") return true;
-            if ((GetWindow(hwnd, GetWindowCommands.OWNER) == IntPtr.Zero) && IsWindowVisible(hwnd))
+            if ((GetWindow(new HandleRef(this, hwnd), GetWindowCommands.OWNER) == IntPtr.Zero) && IsWindowVisible(new HandleRef(this, hwnd)))
             {
                 if (strWindowText.ToString() == this.windowText)
                 {
@@ -313,8 +330,24 @@ namespace AccessProcessMemory
             SearchWindow();
             if (this.windowHandle != default(IntPtr) && this.windowHandle != INVALID_HANDLE_VALUE)
             {
-                SetForegroundWindow(this.windowHandle);
+                SetForegroundWindow(new HandleRef(this, this.windowHandle));
             }
+        }
+
+        public Rectangle GetRectangle()
+        {
+            var rect = new RECT();
+            if (this.windowHandle != default(IntPtr) && this.windowHandle != INVALID_HANDLE_VALUE)
+            {
+                GetWindowRect(new HandleRef(this, this.windowHandle), out rect);
+            }
+            return new Rectangle() 
+            { 
+                X = rect.Left, 
+                Y = rect.Top, 
+                Width = rect.Right - rect.Left + 1, 
+                Height = rect.Bottom - rect.Top + 1 
+            };
         }
 
         public int GetLastError()
